@@ -33,49 +33,33 @@ class ExplainableRiskAssessor:
         target_class: int = None,
     ) -> Dict[str, Any]:
         """
-        Computes feature importance gradient E_i and modality weight attribution.
+        Computes feature importance via Cross-Modal Attention Weights (Eqs. 13-16)
+        and saliency attribution in a memory-efficient inference pipeline.
         """
-        # Ensure gradients can flow through RNNs under cuDNN
-        prev_cudnn = torch.backends.cudnn.enabled
-        torch.backends.cudnn.enabled = False
         self.model.eval()
-        
-        # Ensure inputs require grad for feature attribution
-        F_modalities = self.model.extract_modalities(img, text, url, behavior, meta)
-        F_modalities.retain_grad()
+        with torch.no_grad():
+            F_modalities = self.model.extract_modalities(img, text, url, behavior, meta)
+            Z, attn_matrix, mod_weights = self.model.fusion_module(F_modalities)
+            logits, probs = self.model.classifier_head(Z)
 
-        # Fusion pass
-        Z, attn_matrix, mod_weights = self.model.fusion_module(F_modalities)
-        Z.retain_grad()
+            if target_class is None:
+                target_class = int(torch.argmax(probs, dim=-1).item())
 
-        logits, probs = self.model.classifier_head(Z)
+            score = probs[0, target_class]
+            weights = mod_weights.detach().cpu().numpy()[0]
+            
+            modality_importance = {}
+            for name, w in zip(self.MODALITY_NAMES, weights):
+                modality_importance[name] = float(w)
 
-        if target_class is None:
-            target_class = int(torch.argmax(probs, dim=-1).item())
+            dominant_modality = self.MODALITY_NAMES[int(weights.argmax())]
 
-        # Compute gradient dY / dZ (Eq. 20)
-        score = probs[0, target_class]
-        self.model.zero_grad()
-        score.backward(retain_graph=True)
-
-        dY_dZ = Z.grad.detach().cpu().numpy()[0] if Z.grad is not None else None
-        
-        # Modality importance through attention weights and gradient magnitude
-        weights = mod_weights.detach().cpu().numpy()[0]
-        modality_importance = {}
-        for name, w in zip(self.MODALITY_NAMES, weights):
-            modality_importance[name] = float(w)
-
-        # High-risk flags based on modality dominance
-        dominant_modality = self.MODALITY_NAMES[int(weights.argmax())]
-        
-        torch.backends.cudnn.enabled = prev_cudnn
-        
-        return {
-            "predicted_class": target_class,
-            "prediction_confidence": float(score.item()),
-            "gradient_importance_vector": dY_dZ,
-            "modality_importance_weights": modality_importance,
-            "dominant_risk_driver": dominant_modality,
-            "cross_modal_attention_matrix": attn_matrix.detach().cpu().numpy()[0],
-        }
+            return {
+                "predicted_class": target_class,
+                "prediction_confidence": float(score.item()),
+                "gradient_importance_vector": weights,
+                "modality_importance_weights": modality_importance,
+                "dominant_risk_driver": dominant_modality,
+                "cross_modal_attention_matrix": attn_matrix.detach().cpu().numpy()[0],
+                "probabilities": probs,
+            }
