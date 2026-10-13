@@ -16,32 +16,38 @@ class ImagePreprocessor:
         self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
     def _deskew_qr(self, image: np.ndarray) -> np.ndarray:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
-        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 80, minLineLength=30, maxLineGap=10)
-        
-        if lines is None or len(lines) == 0:
-            return image
-        
-        angles = []
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
-            if abs(angle) < 45:
-                angles.append(angle)
+        try:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+            edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+            lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 80, minLineLength=30, maxLineGap=10)
+            
+            if lines is None or len(lines) == 0:
+                return image
+            
+            angles = []
+            for line in lines:
+                coords = np.asarray(line).ravel()
+                if len(coords) < 4:
+                    continue
+                x1, y1, x2, y2 = coords[:4]
+                angle = np.degrees(np.arctan2(float(y2 - y1), float(x2 - x1)))
+                if abs(angle) < 45:
+                    angles.append(angle)
+                    
+            if not angles:
+                return image
                 
-        if not angles:
+            median_angle = float(np.median(angles))
+            if abs(median_angle) < 0.5:
+                return image
+                
+            h, w = image.shape[:2]
+            center = (w // 2, h // 2)
+            matrix = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+            deskewed = cv2.warpAffine(image, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+            return deskewed
+        except Exception:
             return image
-            
-        median_angle = float(np.median(angles))
-        if abs(median_angle) < 0.5:
-            return image
-            
-        h, w = image.shape[:2]
-        center = (w // 2, h // 2)
-        matrix = cv2.getRotationMatrix2D(center, median_angle, 1.0)
-        deskewed = cv2.warpAffine(image, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-        return deskewed
 
     def __call__(self, img_input: Any) -> np.ndarray:
         if isinstance(img_input, str):

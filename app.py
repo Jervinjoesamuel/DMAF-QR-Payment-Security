@@ -172,10 +172,13 @@ def analyze():
 
             cv_img = cv2.imread(filepath)
             if cv_img is not None:
-                detector = cv2.QRCodeDetector()
-                decoded_text, _, _ = detector.detectAndDecode(cv_img)
-                if decoded_text:
-                    payload_text = clean_qr_text(decoded_text)
+                try:
+                    detector = cv2.QRCodeDetector()
+                    res = detector.detectAndDecode(cv_img)
+                    if isinstance(res, (tuple, list)) and len(res) > 0 and res[0]:
+                        payload_text = clean_qr_text(str(res[0]))
+                except Exception:
+                    pass
 
         result = process_and_authenticate(cv_img, payload_text)
         if saved_rel_path:
@@ -218,9 +221,13 @@ def random_kaggle_sample():
         if files:
             chosen_file = random.choice(files)
             im = cv2.imread(chosen_file)
-            detector = cv2.QRCodeDetector()
-            decoded, _, _ = detector.detectAndDecode(im)
-            clean_text = clean_qr_text(decoded)
+            try:
+                detector = cv2.QRCodeDetector()
+                res = detector.detectAndDecode(im)
+                if isinstance(res, (tuple, list)) and len(res) > 0 and res[0]:
+                    clean_text = clean_qr_text(str(res[0]))
+            except Exception:
+                pass
             
             rel_name = f"sample_{int(time.time()*1000)}.png"
             dest_path = os.path.join(app.config["UPLOAD_FOLDER"], rel_name)
